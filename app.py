@@ -3,42 +3,35 @@ import pandas as pd
 import plotly.graph_objects as go
 
 # ==========================================
-# 核心渲染引擎：生成带边缘线的三维长方体 (模拟真实的铝型材)
+# 市场参考价格库 (包含安全防护配件)
 # ==========================================
+PRICES = {
+    "profile_4040": 45.0,  
+    "profile_3030": 25.0,  
+    "panel_solid": 200.0,  
+    "bracket_std": 2.5,    # 标准外露角码 + 螺丝
+    "bracket_cover": 0.8,  # 角码圆润盖板
+    "bracket_hidden": 4.5, # 隐形内置连接件 (更贵但绝对安全平整)
+    "slot_strip": 3.0,     # PVC平槽胶条 (3元/米)
+    "end_cap": 0.5         # 圆润塑料端盖
+}
+
 def create_box_traces(x, y, z, dx, dy, dz, color, name):
-    """返回实体Mesh和边缘线两个Trace"""
-    # 8个顶点
     xx = [x, x+dx, x+dx, x, x, x+dx, x+dx, x]
     yy = [y, y, y+dy, y+dy, y, y, y+dy, y+dy]
     zz = [z, z, z, z, z+dz, z+dz, z+dz, z+dz]
-    
-    # Mesh 表面
     i = [0, 0, 4, 4, 0, 0, 3, 3, 0, 0, 1, 1]
     j = [1, 2, 5, 6, 1, 5, 2, 6, 3, 7, 2, 6]
     k = [2, 3, 6, 7, 5, 4, 6, 7, 7, 4, 6, 5]
-    
-    mesh = go.Mesh3d(
-        x=xx, y=yy, z=zz, i=i, j=j, k=k, 
-        color=color, opacity=0.9, name=name, showlegend=False, flatshading=True,
-        lighting=dict(ambient=0.5, diffuse=0.8, roughness=0.1)
-    )
-    
-    # 黑色的轮廓边缘线 (增加CAD图纸感)
+    mesh = go.Mesh3d(x=xx, y=yy, z=zz, i=i, j=j, k=k, color=color, opacity=0.9, name=name, showlegend=False, flatshading=True)
     x_edges = [x, x+dx, x+dx, x, x, x, x+dx, x+dx, x+dx, x+dx, x, x, x, x, x+dx, x+dx]
     y_edges = [y, y, y+dy, y+dy, y, y, y, y, y+dy, y+dy, y+dy, y+dy, y+dy, y, y, y+dy]
     z_edges = [z, z, z, z, z, z+dz, z+dz, z, z, z+dz, z+dz, z, z+dz, z+dz, z+dz, z+dz]
-    
-    edges = go.Scatter3d(
-        x=x_edges, y=y_edges, z=z_edges, 
-        mode='lines', line=dict(color='#2c3e50', width=3), showlegend=False, hoverinfo='skip'
-    )
+    edges = go.Scatter3d(x=x_edges, y=y_edges, z=z_edges, mode='lines', line=dict(color='#2c3e50', width=3), showlegend=False, hoverinfo='skip')
     return [mesh, edges]
 
-# ==========================================
-# 界面交互与参数配置
-# ==========================================
 st.set_page_config(page_title="Pro 铝型材装配设计", layout="wide")
-st.title("🏗️ 工业级参数化半高床设计器 (带干涉计算)")
+st.title("🏗️ 工业级半高床设计器 (注重人员安全版)")
 
 with st.sidebar:
     st.header("📐 空间参数")
@@ -47,119 +40,118 @@ with st.sidebar:
     H_bed = st.number_input("床架净空高度 (mm)", value=1300, step=10)
     H_rail = st.number_input("护栏高度 (mm)", value=400, step=10)
     
-    st.header("🚪 入口与爬梯模块")
+    st.header("🚪 入口与爬梯")
     entrance_pos = st.radio("上下床入口位置", ["左侧", "右侧"])
-    ladder_W = st.number_input("爬梯/入口宽度 (mm)", min_value=300, max_value=800, value=450, step=10)
+    ladder_W = st.number_input("爬梯宽度 (mm)", min_value=300, max_value=800, value=450, step=10)
     
-    st.header("⚙️ 材料定义")
+    st.header("⚙️ 材料与安全配置")
     profile_type = st.selectbox("主型材型号", ["4040", "3030"])
-    pw = int(profile_type) // 100 # 解析宽度，4040 -> 40mm
+    pw = int(profile_type) // 100 
+    
+    # 新增安全防护选项
+    safety_level = st.radio(
+        "人员安全防护等级", 
+        ["工业基础 (无防护，有磕碰风险)", 
+         "家用标准 (加装角码盖板 + 端盖)", 
+         "母婴级防磕碰 (内置隐形连接件 + 全包覆平槽胶条)"],
+        index=2
+    )
 
-# ==========================================
-# 装配算法与 BOM 生成
-# ==========================================
 fig = go.Figure()
 bom_raw = []
+total_profile_length_mm = 0 # 用于计算需要多少米防撞胶条
 
 def add_part(module, name, x, y, z, dx, dy, dz, color):
-    """将零件添加到三维空间，并同步记录到BOM"""
+    global total_profile_length_mm
     traces = create_box_traces(x, y, z, dx, dy, dz, color, name)
     fig.add_traces(traces)
-    length = int(max(dx, dy, dz)) # 获取最长边作为切割尺寸
-    bom_raw.append({"装配模块": module, "零件名称": name, "型号": f"{profile_type}型材", "精确切割长度(mm)": length})
+    length_mm = int(max(dx, dy, dz))
+    total_profile_length_mm += length_mm
+    
+    unit_cost = (length_mm / 1000.0) * PRICES[f"profile_{profile_type}"]
+    bom_raw.append({"模块": module, "物料名称": f"{profile_type} 型材", "规格/尺寸": f"{length_mm} mm", "单价预估(元)": round(unit_cost, 2)})
 
-# 颜色预设
-C_PILLAR = '#7f8c8d'  # 立柱-深灰
-C_BEAM = '#bdc3c7'    # 横梁-浅银
-C_RAIL = '#f1c40f'    # 护栏-黄色
-C_LADDER = '#3498db'  # 爬梯-蓝色
-C_PANEL = '#d35400'   # 面板-木色 (半透明)
-
+# 颜色
+C_PILLAR, C_BEAM, C_RAIL, C_LADDER, C_PANEL = '#7f8c8d', '#bdc3c7', '#f1c40f', '#3498db', '#d35400'
 H_total = H_bed + H_rail
 
-# 1. 生成 6 根承重主立柱
-pillars = [
-    (0, 0), (L-pw, 0),             # 前排：左，右
-    (0, W-pw), (L-pw, W-pw),       # 后排：左，右
-    (L/2-pw/2, 0), (L/2-pw/2, W-pw)# 中间：前，后 (防塌陷)
-]
-for i, (px, py) in enumerate(pillars):
-    add_part("主框架", f"立柱-{i+1}", px, py, 0, pw, pw, H_total, C_PILLAR)
+# 1. 立柱
+for px, py in [(0, 0), (L-pw, 0), (0, W-pw), (L-pw, W-pw), (L/2-pw/2, 0), (L/2-pw/2, W-pw)]:
+    add_part("主框架", "立柱", px, py, 0, pw, pw, H_total, C_PILLAR)
 
-# 2. 生成床铺层与底层的横梁 (Z=0 和 Z=H_bed-pw)
-# 计算被中间立柱打断的横梁长度
-beam_L_half = L/2 - 1.5*pw
-beam_W_full = W - 2*pw
-
+# 2. 横梁
+beam_L_half, beam_W_full = L/2 - 1.5*pw, W - 2*pw
 for z_level, m_name in [(0, "底部地梁"), (H_bed-pw, "床板承重架")]:
-    # 前后长横梁 (共4段)
-    add_part(m_name, "长横梁-左段", pw, 0, z_level, beam_L_half, pw, pw, C_BEAM)
-    add_part(m_name, "长横梁-右段", L/2+pw/2, 0, z_level, beam_L_half, pw, pw, C_BEAM)
-    add_part(m_name, "长横梁-后左段", pw, W-pw, z_level, beam_L_half, pw, pw, C_BEAM)
-    add_part(m_name, "长横梁-后右段", L/2+pw/2, W-pw, z_level, beam_L_half, pw, pw, C_BEAM)
-    
-    # 左右宽横梁及中间横撑 (共3段)
-    add_part(m_name, "宽横梁-左", 0, pw, z_level, pw, beam_W_full, pw, C_BEAM)
-    add_part(m_name, "宽横梁-右", L-pw, pw, z_level, pw, beam_W_full, pw, C_BEAM)
-    add_part(m_name, "宽横撑-中", L/2-pw/2, pw, z_level, pw, beam_W_full, pw, C_BEAM)
+    add_part(m_name, "长横梁", pw, 0, z_level, beam_L_half, pw, pw, C_BEAM)
+    add_part(m_name, "长横梁", L/2+pw/2, 0, z_level, beam_L_half, pw, pw, C_BEAM)
+    add_part(m_name, "长横梁", pw, W-pw, z_level, beam_L_half, pw, pw, C_BEAM)
+    add_part(m_name, "长横梁", L/2+pw/2, W-pw, z_level, beam_L_half, pw, pw, C_BEAM)
+    add_part(m_name, "宽横梁", 0, pw, z_level, pw, beam_W_full, pw, C_BEAM)
+    add_part(m_name, "宽横梁", L-pw, pw, z_level, pw, beam_W_full, pw, C_BEAM)
+    add_part(m_name, "宽横撑", L/2-pw/2, pw, z_level, pw, beam_W_full, pw, C_BEAM)
 
-# 3. 生成安全护栏 (带参数化布尔打断逻辑)
+# 3. 护栏
 z_rail = H_total - pw
-# 后、左、右护栏完整
-add_part("安全护栏", "后护栏(完整)", pw, W-pw, z_rail, L-2*pw, pw, pw, C_RAIL)
+add_part("安全护栏", "后护栏", pw, W-pw, z_rail, L-2*pw, pw, pw, C_RAIL)
 add_part("安全护栏", "左护栏", 0, pw, z_rail, pw, beam_W_full, pw, C_RAIL)
 add_part("安全护栏", "右护栏", L-pw, pw, z_rail, pw, beam_W_full, pw, C_RAIL)
-
-# 前护栏：根据入口位置进行切断运算
 if entrance_pos == "左侧":
-    # 左边空出 ladder_W，护栏从 pw+ladder_W 开始，一直到 L-pw
-    rail_start = pw + ladder_W
-    rail_len = (L - pw) - rail_start
-    add_part("安全护栏", "前护栏(右侧保留段)", rail_start, 0, z_rail, rail_len, pw, pw, C_RAIL)
-else: # 右侧
-    # 右侧空出 ladder_W，护栏从 pw 开始，到 (L-pw)-ladder_W 结束
-    rail_len = (L - pw - ladder_W) - pw
-    add_part("安全护栏", "前护栏(左侧保留段)", pw, 0, z_rail, rail_len, pw, pw, C_RAIL)
+    add_part("安全护栏", "前护栏", pw + ladder_W, 0, z_rail, (L - pw) - (pw + ladder_W), pw, pw, C_RAIL)
+else:
+    add_part("安全护栏", "前护栏", pw, 0, z_rail, (L - pw - ladder_W) - pw, pw, pw, C_RAIL)
 
-# 4. 生成子装配体：爬梯模块 (贴在外侧 y = -pw)
-# 确定爬梯的X坐标基准
-ladder_x_start = pw if entrance_pos == "左侧" else (L - pw - ladder_W)
+# 4. 爬梯
+ladder_x = pw if entrance_pos == "左侧" else (L - pw - ladder_W)
+add_part("爬梯模块", "爬梯立杆", ladder_x, -pw, 0, pw, pw, H_total, C_LADDER)
+add_part("爬梯模块", "爬梯立杆", ladder_x + ladder_W - pw, -pw, 0, pw, pw, H_total, C_LADDER)
+for s in range(1, int(H_bed // 280) + 1):
+    add_part("爬梯模块", "踏步", ladder_x + pw, -pw, s * 280, ladder_W - 2*pw, pw, pw, C_LADDER)
 
-# 梯子左右立杆
-add_part("爬梯模块", "爬梯左立杆", ladder_x_start, -pw, 0, pw, pw, H_total, C_LADDER)
-add_part("爬梯模块", "爬梯右立杆", ladder_x_start + ladder_W - pw, -pw, 0, pw, pw, H_total, C_LADDER)
-
-# 自动计算踏步数量并循环生成
-step_spacing = 280 # 踏步间距约 28厘米
-steps_count = int(H_bed // step_spacing)
-step_len = ladder_W - 2*pw
-for s in range(1, steps_count + 1):
-    z_step = s * step_spacing
-    add_part("爬梯模块", f"爬梯踏步-{s}", ladder_x_start + pw, -pw, z_step, step_len, pw, pw, C_LADDER)
-
-# 5. 生成内嵌面板 (使用半透明薄片展示)
-inner_L = L - 2*pw - 2
-inner_W = W - 2*pw - 2
+# 5. 面板
+inner_L, inner_W = L - 2*pw - 2, W - 2*pw - 2
 fig.add_traces(create_box_traces(pw+1, pw+1, H_bed-10, inner_L, inner_W, 10, C_PANEL, "实木床板"))
-bom_raw.append({"装配模块": "木作模块", "零件名称": "内嵌实木床板", "型号": "18mm实木拼板", "精确切割长度(mm)": f"{inner_L} × {inner_W}"})
+bom_raw.append({"模块": "木作模块", "物料名称": "18mm实木床板", "规格/尺寸": f"{inner_L} × {inner_W} mm", "单价预估(元)": round((inner_L/1000)*(inner_W/1000)*PRICES["panel_solid"], 2)})
 
-# 优化三维视图显示
-fig.update_layout(
-    scene=dict(
-        xaxis_title='X (长度)', yaxis_title='Y (宽度/进深)', zaxis_title='Z (高度)',
-        aspectmode='data',
-        camera=dict(eye=dict(x=1.5, y=-1.5, z=1.2)) # 默认最佳俯视斜角
-    ),
-    margin=dict(l=0, r=0, b=0, t=0), height=600
-)
+fig.update_layout(scene=dict(aspectmode='data'), margin=dict(l=0, r=0, b=0, t=0), height=500)
 
 # ==========================================
-# BOM 数据透视与汇总 (工业标准格式)
+# 财务聚合与安全防护配件推算
 # ==========================================
 df_raw = pd.DataFrame(bom_raw)
-# 将同尺寸、同型号的零件进行合并统计
-df_grouped = df_raw.groupby(['装配模块', '型号', '精确切割长度(mm)']).size().reset_index(name='需求数量(根/块)')
-df_grouped = df_grouped.sort_values(by=['装配模块', '需求数量(根/块)'], ascending=[True, False])
+df_grouped = df_raw.groupby(['模块', '物料名称', '规格/尺寸', '单价预估(元)']).size().reset_index(name='数量')
+df_grouped['小计(元)'] = df_grouped['单价预估(元)'] * df_grouped['数量']
+
+hardware_bom = []
+profile_count = len(df_raw) - 1 
+bracket_qty = profile_count * 2
+
+# 根据安全等级计算五金配件
+if safety_level == "工业基础 (无防护，有磕碰风险)":
+    cost = bracket_qty * PRICES["bracket_std"]
+    hardware_bom.append({"模块": "五金及安全配件", "物料名称": "标准直角角码+螺丝", "规格/尺寸": "外露型", "单价预估(元)": PRICES["bracket_std"], "数量": bracket_qty, "小计(元)": cost})
+    
+elif safety_level == "家用标准 (加装角码盖板 + 端盖)":
+    cost1 = bracket_qty * PRICES["bracket_std"]
+    cost2 = bracket_qty * PRICES["bracket_cover"]
+    cap_qty = 14 # 估算立柱顶部和爬梯端头
+    cost3 = cap_qty * PRICES["end_cap"]
+    hardware_bom.append({"模块": "五金及安全配件", "物料名称": "标准直角角码+螺丝", "规格/尺寸": "外露型", "单价预估(元)": PRICES["bracket_std"], "数量": bracket_qty, "小计(元)": cost1})
+    hardware_bom.append({"模块": "五金及安全配件", "物料名称": "护角防撞盖板", "规格/尺寸": "配套角码", "单价预估(元)": PRICES["bracket_cover"], "数量": bracket_qty, "小计(元)": cost2})
+    hardware_bom.append({"模块": "五金及安全配件", "物料名称": "圆润塑料端盖", "规格/尺寸": "封堵型材端面", "单价预估(元)": PRICES["end_cap"], "数量": cap_qty, "小计(元)": cost3})
+
+elif safety_level == "母婴级防磕碰 (内置隐形连接件 + 全包覆平槽胶条)":
+    cost1 = bracket_qty * PRICES["bracket_hidden"]
+    strip_meters = int(total_profile_length_mm * 2 / 1000) # 假设一根型材平均2个面需要封槽
+    cost2 = strip_meters * PRICES["slot_strip"]
+    cap_qty = 14
+    cost3 = cap_qty * PRICES["end_cap"]
+    hardware_bom.append({"模块": "五金及安全配件", "物料名称": "隐形内置连接件", "规格/尺寸": "需型材打孔", "单价预估(元)": PRICES["bracket_hidden"], "数量": bracket_qty, "小计(元)": cost1})
+    hardware_bom.append({"模块": "五金及安全配件", "物料名称": "PVC防撞平槽胶条", "规格/尺寸": "填平凹槽防割伤", "单价预估(元)": PRICES["slot_strip"], "数量": strip_meters, "小计(元)": cost2})
+    hardware_bom.append({"模块": "五金及安全配件", "物料名称": "圆润塑料端盖", "规格/尺寸": "封堵型材端面", "单价预估(元)": PRICES["end_cap"], "数量": cap_qty, "小计(元)": cost3})
+
+df_hardware = pd.DataFrame(hardware_bom)
+df_final = pd.concat([df_grouped, df_hardware], ignore_index=True)
+total_cost = df_final['小计(元)'].sum()
 
 # ==========================================
 # 界面渲染输出
@@ -167,16 +159,12 @@ df_grouped = df_grouped.sort_values(by=['装配模块', '需求数量(根/块)']
 col1, col2 = st.columns([5, 3])
 
 with col1:
-    st.subheader("🛠️ 实时装配三维视图 (Solid Model)")
     st.plotly_chart(fig, use_container_width=True)
+    if "母婴级" in safety_level:
+        st.success("✅ 当前为最高安全标准。框架表面将没有突出的螺丝和角码，所有凹槽都会被柔软的胶条填平，立柱顶端也会被封堵。")
+    elif "工业基础" in safety_level:
+        st.error("⚠️ 警告：不建议将工业基础标准直接用于儿童床或频繁接触的家具，存在边缘割伤风险。")
 
 with col2:
-    st.subheader("📋 自动化物料清单 (BOM)")
-    st.write("这不再是估算！这是根据左侧三维模型中的每一根实体，进行布尔扣减后自动遍历得出的**真实下料单**。")
-    st.dataframe(df_grouped, use_container_width=True, hide_index=True)
-    
-    st.info(f"**五金件推算模块：**\n系统检测到本次装配共生成了 {len(df_raw)} 个基础零件。根据 T 型连接点的拓扑计算，建议购买：\n"
-            f"- **{profile_type} 角码**: {len(df_raw) * 2} 个\n"
-            f"- **T型滑块螺母**: {len(df_raw) * 4} 个\n"
-            f"- **内六角螺丝**: {len(df_raw) * 4} 个\n"
-            f"- **角码盖板/端盖**: 约 20 个")
+    st.metric(label="💰 预估总造价", value=f"¥ {total_cost:,.2f}")
+    st.dataframe(df_final[['模块', '物料名称', '规格/尺寸', '数量', '小计(元)']].sort_values(by=['模块', '小计(元)'], ascending=[True, False]), use_container_width=True, hide_index=True)
