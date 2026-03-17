@@ -4,115 +4,96 @@ import plotly.graph_objects as go
 
 # --- 数据库预设 ---
 PROFILES = {
-    "2020型": {"width": 20, "max_load_kg": 50},
     "3030型": {"width": 30, "max_load_kg": 150},
     "4040型": {"width": 40, "max_load_kg": 300},
+    "4080型": {"width": 40, "max_load_kg": 600}, # 做床强烈建议主梁用4080
 }
 
 PANELS = {
-    "实木拼板 (18mm)": {"desc": "美观，适合做桌面或高端书架"},
-    "亚克力板 (5mm)": {"desc": "透明，适合做防尘罩、轻型展示架"},
-    "密度板/免漆板 (15mm)": {"desc": "性价比高，最适合做多层储物架"},
+    "实木拼板 (18mm)": {"desc": "结实环保，做床板或高档柜门"},
+    "密度板/免漆板 (15mm)": {"desc": "性价比高，适合做床下储物柜的柜体"},
+    "多层实木板 (18mm)": {"desc": "防潮性好，承重极佳，最适合做床板"}
 }
 
-def draw_3d_frame(L, W, H, tiers, furniture_type):
-    """绘制简单的 3D 框架"""
+def draw_loft_bed(L, W, H_clearance, H_guardrail):
+    """专门绘制半高床的 3D 结构"""
     fig = go.Figure()
-    # 4根立柱
+    H_total = H_clearance + H_guardrail
+    
+    # 6根立柱 (四个角 + 长边中间2根)
+    mid_L = L / 2
     columns = [
-        ([0, 0], [0, 0], [0, H]), ([L, L], [0, 0], [0, H]),
-        ([L, L], [W, W], [0, H]), ([0, 0], [W, W], [0, H])
+        ([0, 0], [0, 0], [0, H_total]), ([L, L], [0, 0], [0, H_total]),
+        ([L, L], [W, W], [0, H_total]), ([0, 0], [W, W], [0, H_total]),
+        ([mid_L, mid_L], [0, 0], [0, H_total]), ([mid_L, mid_L], [W, W], [0, H_total]) # 中间两根
     ]
     for x, y, z in columns:
-        fig.add_trace(go.Scatter3d(x=x, y=y, z=z, mode='lines', line=dict(color='#7f8c8d', width=6), showlegend=False))
+        fig.add_trace(go.Scatter3d(x=x, y=y, z=z, mode='lines', line=dict(color='#7f8c8d', width=8), showlegend=False))
     
-    # 层高计算
-    if furniture_type == "多层置物架" and tiers > 1:
-        z_levels = [H * i / (tiers - 1) for i in range(tiers)]
-    elif furniture_type == "简易四方箱体":
-        z_levels = [0, H]
-    else:
-        z_levels = [H]
+    # 床铺主框架 (高度 = H_clearance)
+    z_bed = H_clearance
+    fig.add_trace(go.Scatter3d(x=[0, L, L, 0, 0], y=[0, 0, W, W, 0], z=[z_bed]*5, mode='lines', line=dict(color='#e74c3c', width=8), name="床铺主承重梁"))
+    
+    # 床板支撑横梁 (排骨架，简化画3根)
+    for step in [L*0.25, L*0.5, L*0.75]:
+        fig.add_trace(go.Scatter3d(x=[step, step], y=[0, W], z=[z_bed, z_bed], mode='lines', line=dict(color='#e74c3c', width=4), showlegend=False))
 
-    for z in z_levels:
-        x_rect = [0, L, L, 0, 0]
-        y_rect = [0, 0, W, W, 0]
-        z_rect = [z, z, z, z, z]
-        fig.add_trace(go.Scatter3d(x=x_rect, y=y_rect, z=z_rect, mode='lines', line=dict(color='#3498db', width=6), name=f"层高 {int(z)}mm"))
+    # 护栏框架 (高度 = H_total)
+    fig.add_trace(go.Scatter3d(x=[0, L, L, 0, 0], y=[0, 0, W, W, 0], z=[H_total]*5, mode='lines', line=dict(color='#f39c12', width=5), name="安全护栏"))
     
-    fig.update_layout(scene=dict(xaxis_title='长', yaxis_title='宽', zaxis_title='高', aspectmode='data'), margin=dict(l=0, r=0, b=0, t=0), height=400, showlegend=False)
+    # 床下储物柜基础框架 (贴地框架)
+    fig.add_trace(go.Scatter3d(x=[0, L, L, 0, 0], y=[0, 0, W, W, 0], z=[0]*5, mode='lines', line=dict(color='#3498db', width=5), name="底部地梁(防变形)"))
+
+    fig.update_layout(scene=dict(xaxis_title='长', yaxis_title='宽', zaxis_title='高', aspectmode='data'), margin=dict(l=0, r=0, b=0, t=0), height=500, showlegend=True)
     return fig
 
 # --- 界面布局 ---
 st.set_page_config(page_title="铝型材家具设计助手", layout="wide")
-st.title("🧰 DIY 铝型材家具设计助手 (精准尺寸版)")
+st.title("🧰 DIY 铝型材半高床生成器")
 
 with st.sidebar:
-    st.header("1. 设定家具参数")
-    furniture_type = st.selectbox("家具类型", ["多层置物架", "基础桌子/工作台", "简易四方箱体"])
+    st.header("1. 半高床参数")
+    L = st.number_input("床铺总长度 (mm)", value=2000, step=10)
+    W = st.number_input("床铺总宽度 (mm)", value=1200, step=10)
+    H_clearance = st.number_input("床下净空高度 (mm)", value=1200, step=10, help="决定了你下面能放多高的柜子")
+    H_guardrail = st.number_input("顶层护栏高度 (mm)", value=350, step=10)
     
-    L = st.number_input("外部总长度 (mm)", min_value=100, max_value=3000, value=1000, step=10)
-    W = st.number_input("外部总宽度 (mm)", min_value=100, max_value=2000, value=400, step=10)
-    H = st.number_input("外部总高度 (mm)", min_value=100, max_value=2500, value=1500, step=10)
-    
-    tiers = 1
-    if furniture_type == "多层置物架":
-        tiers = st.number_input("层架数量 (含顶层和底层)", min_value=2, max_value=10, value=4, step=1)
-    
-    st.header("2. 选择材料")
-    profile_choice = st.selectbox("铝型材型号", list(PROFILES.keys()), index=1)
-    panel_choice = st.selectbox("面板材质", list(PANELS.keys()), index=2)
-
-    st.header("3. 面板安装方式")
-    st.info("安装方式直接影响面板的购买/切割尺寸！")
-    top_panel_style = st.radio("顶层面板安装", ["平铺 (盖在型材上方)", "内嵌 (卡在立柱中间)"])
-    
-    lower_panel_style = "内嵌 (卡在立柱中间)"
-    if tiers > 1 or furniture_type == "简易四方箱体":
-        lower_panel_style = st.radio("中/下层面板安装", ["内嵌 (推荐，四边规整)", "平铺 (四角需自行锯掉缺口)"])
+    st.header("2. 材料选择")
+    profile_choice = st.selectbox("主框架铝型材", ["4040型", "4080型"], index=0, help="做床严禁使用2020或3030，必须4040起步！")
+    panel_choice = st.selectbox("床板材质", list(PANELS.keys()), index=2)
 
 # --- 计算逻辑 ---
 profile_w = PROFILES[profile_choice]["width"]
 bom_items = []
+H_total = H_clearance + H_guardrail
 
-# 1. 框架型材
-bom_items.append({"部位": "主框架", "配件名称": f"立柱 - {profile_choice}", "精确切割尺寸": f"{H} mm", "数量": 4, "备注": "高度"})
+# 1. 6根立柱 (非常关键)
+bom_items.append({"部位": "主立柱", "配件名称": f"立柱 - {profile_choice}", "切割尺寸": f"{H_total} mm", "数量": 6, "备注": "四角4根，长边中段2根防塌"})
+
+# 2. 承重主框架 (床铺那一层 + 底部地梁 + 顶部护栏)
+# 扣除立柱厚度
 l_len = L - (profile_w * 2)
 w_len = W - (profile_w * 2)
 
-if furniture_type == "多层置物架":
-    qty_multiplier = tiers
-elif furniture_type == "简易四方箱体":
-    qty_multiplier = 2
-else:
-    qty_multiplier = 1
+# 长横梁：底部2根 + 床铺层2根 + 护栏2根 = 6根
+bom_items.append({"部位": "横梁(长边)", "配件名称": f"长横梁 - {profile_choice}", "切割尺寸": f"{l_len} mm", "数量": 6, "备注": "地梁/床架/护栏"})
+# 宽横梁：底部3根(含中间) + 床铺层3根(含中间) + 护栏2根 = 8根
+bom_items.append({"部位": "横梁(宽边)", "配件名称": f"宽横梁 - {profile_choice}", "切割尺寸": f"{w_len} mm", "数量": 8, "备注": "地梁/床架/护栏"})
 
-bom_items.append({"部位": "主框架", "配件名称": f"长横梁 - {profile_choice}", "精确切割尺寸": f"{l_len} mm", "数量": 2 * qty_multiplier, "备注": f"已扣除{profile_w*2}mm立柱厚度"})
-bom_items.append({"部位": "主框架", "配件名称": f"宽横梁 - {profile_choice}", "精确切割尺寸": f"{w_len} mm", "数量": 2 * qty_multiplier, "备注": f"已扣除{profile_w*2}mm立柱厚度"})
+# 3. 床板支撑排骨架 (用4040横穿长边)
+support_w_len = w_len # 宽度方向的横撑
+bom_items.append({"部位": "床板支撑", "配件名称": "承重横撑 - 4040型", "切割尺寸": f"{support_w_len} mm", "数量": 4, "备注": "均布在床架下方支撑床板"})
 
-# 2. 面板尺寸计算 (核心修正点)
-# 预留 2mm 安装公差，防止太紧塞不进去
+# 4. 面板计算 (床板)
 inner_L = L - (profile_w * 2) - 2
 inner_W = W - (profile_w * 2) - 2
+bom_items.append({"部位": "床板", "配件名称": f"主床板 ({panel_choice})", "切割尺寸": f"{inner_L} × {inner_W} mm", "数量": 1, "备注": "内嵌尺寸。太大的话建议让商家对半切成两块，方便搬运"})
 
-# 计算顶层面板
-if "平铺" in top_panel_style:
-    bom_items.append({"部位": "顶板", "配件名称": f"顶板 ({panel_choice})", "精确切割尺寸": f"{L} × {W} mm", "数量": 1, "备注": "直接盖在最上面"})
-else:
-    bom_items.append({"部位": "顶板", "配件名称": f"顶板 ({panel_choice})", "精确切割尺寸": f"{inner_L} × {inner_W} mm", "数量": 1, "备注": f"内嵌尺寸 (已扣除立柱厚度并预留2mm公差)"})
-
-# 计算下层面板
-lower_panels_qty = tiers - 1 if furniture_type == "多层置物架" else (1 if furniture_type == "简易四方箱体" else 0)
-if lower_panels_qty > 0:
-    if "内嵌" in lower_panel_style:
-        bom_items.append({"部位": "下层板", "配件名称": f"层板 ({panel_choice})", "精确切割尺寸": f"{inner_L} × {inner_W} mm", "数量": lower_panels_qty, "备注": "内嵌尺寸 (放入框架内部)"})
-    else:
-        bom_items.append({"部位": "下层板", "配件名称": f"层板 ({panel_choice})", "精确切割尺寸": f"{L} × {W} mm", "数量": lower_panels_qty, "备注": f"⚠️ 警告: 四角需各切掉 {profile_w}x{profile_w}mm 的缺口才能避让立柱"})
-
-# 3. 连接件计算
-bracket_qty = 8 * qty_multiplier
-bom_items.append({"部位": "五金件", "配件名称": f"{profile_choice} 直角角件", "精确切割尺寸": "标准", "数量": bracket_qty, "备注": "每层8个交角点"})
-bom_items.append({"部位": "五金件", "配件名称": "内六角螺栓 + T型螺母", "精确切割尺寸": "配套尺寸", "数量": bracket_qty * 2, "备注": "固定角件必备"})
+# 5. 连接件
+# 节点非常多，这里做一个估算：6个立柱 * 3层(底,中,顶) = 18个主要节点。每个节点至少2-3个角件
+bracket_qty = 18 * 3 + 8 # 加上排骨架的连接件
+bom_items.append({"部位": "五金件", "配件名称": f"{profile_choice} 强力角件", "切割尺寸": "标准", "数量": bracket_qty, "备注": "必须使用重型角件"})
+bom_items.append({"部位": "五金件", "配件名称": "内六角螺栓+T型螺母", "切割尺寸": "配套尺寸", "数量": bracket_qty * 2, "备注": "宁多勿少"})
 
 df_bom = pd.DataFrame(bom_items)
 
@@ -120,22 +101,17 @@ df_bom = pd.DataFrame(bom_items)
 col1, col2 = st.columns([3, 2])
 
 with col1:
-    st.subheader("📐 3D 结构预览")
-    fig = draw_3d_frame(L, W, H, tiers, furniture_type)
+    st.subheader("📐 半高床 3D 结构预览")
+    fig = draw_loft_bed(L, W, H_clearance, H_guardrail)
     st.plotly_chart(fig, use_container_width=True)
 
 with col2:
-    st.subheader("💡 面板安装图解说明")
-    if "内嵌" in top_panel_style or ("内嵌" in lower_panel_style and lower_panels_qty > 0):
-        st.success(f"**内嵌尺寸计算逻辑：**\n\n以长边为例：总长 {L}mm - 左侧立柱 {profile_w}mm - 右侧立柱 {profile_w}mm - 安装余量(公差) 2mm = **{inner_L}mm**。宽边同理。这样板子正好能平滑地放入型材组成的方框中。")
-    if "平铺" in lower_panel_style and lower_panels_qty > 0:
-        st.warning(f"**⚠️ 避让切角警告：**\n\n您选择了中/下层板采用【平铺】。因为四角有贯穿的立柱挡着，您买回板子后，必须自己用工具在板子的四个角各切掉一个 **{profile_w} × {profile_w} mm** 的正方形缺口，否则板子无法放平！")
+    st.subheader("⚠️ 安全与工程警告")
+    st.error("**承重警告：** 床是用来睡人的，存在动态载荷（翻身、上下床）。**绝对不能用 2020 或 3030 型材！** 建议立柱用 4040，承重主长梁用 4080（侧放）。")
+    st.warning("**防倾倒警告：** 半高床重心极高！组装完成后，**必须使用膨胀螺丝或强力 L 型角码将靠近墙面的立柱与实体墙进行固定**，否则有严重的倾倒倒塌风险！")
+    st.info("**关于下层储物柜：** 底部的蓝色和红色框架之间就是你的储物空间。你可以用 2020 型材或者直接用免漆板在里面组装独立的柜子，然后塞进去。")
 
 st.divider()
 
-st.subheader("🛒 精准采购材料清单 (BOM)")
-st.write("现在的清单已经考虑了面板安装方式及立柱厚度的扣减，可以直接发给商家进行裁切了。")
+st.subheader("🛒 半高床核心框架 BOM 清单")
 st.dataframe(df_bom, use_container_width=True, hide_index=True)
-
-csv = df_bom.to_csv(index=False).encode('utf-8-sig')
-st.download_button(label="📥 下载精准 BOM 清单 (CSV格式)", data=csv, file_name='DIY_Furniture_Accurate_BOM.csv', mime='text/csv')
